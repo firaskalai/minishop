@@ -100,8 +100,9 @@ app.use("/api/orders", (req, res) => {
   // Admin-only: dashboard data and accept/reject transitions.
   const isAdminRoute = req.method === "PATCH" || (req.method === "GET" && (req.path === "/stats" || req.path === "/manage"));
   if (isAdminRoute) return requireRole("ADMIN")(req, res, forward);
-  if (req.method === "POST") return requireAuth(req, res, forward);
-  forward();
+  // Any other order route (create, list "my orders", read one) needs a logged-in user;
+  // the Order Service then scopes the data to that user.
+  return requireAuth(req, res, forward);
 });
 
 app.use((req, res) => {

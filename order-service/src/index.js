@@ -105,6 +105,13 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+function requireUser(req, res, next) {
+  const actor = actorFromHeaders(req);
+  if (!actor) return res.status(401).json({ error: "Authentication required" });
+  req.actor = actor;
+  next();
+}
+
 function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -163,16 +170,18 @@ app.get("/orders/manage", requireAdmin, async (req, res, next) => {
   }
 });
 
-app.get("/orders", async (req, res, next) => {
+// "My orders": always scoped to the authenticated user, whatever their role.
+// Admins see every order through /orders/manage (dashboard), not through this route.
+app.get("/orders", requireUser, async (req, res, next) => {
   try {
-    const orders = await Order.find().sort({ createdAt: -1 }).lean();
+    const orders = await Order.find({ "customer.id": req.actor.id }).sort({ createdAt: -1 }).lean();
     res.json(orders);
   } catch (error) {
     next(error);
   }
 });
 
-app.get("/orders/:id", async (req, res, next) => {
+app.get("/orders/:id", requireUser, async (req, res, next) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
       return res.status(400).json({
@@ -182,7 +191,9 @@ app.get("/orders/:id", async (req, res, next) => {
 
     const order = await Order.findById(req.params.id).lean();
 
-    if (!order) {
+    // A non-admin only gets their own orders; others look like "not found" to avoid leaking their existence.
+    const isOwner = order?.customer?.id === req.actor.id;
+    if (!order || (req.actor.role !== "ADMIN" && !isOwner)) {
       return res.status(404).json({
         error: "Order not found"
       });

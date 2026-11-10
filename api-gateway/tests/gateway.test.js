@@ -44,7 +44,8 @@ describe("API Gateway", () => {
   it("returns a controlled error when a backend is unavailable", async () => {
     global.fetch.mockRejectedValue(new Error("connection refused"));
 
-    const response = await request(app).get("/api/orders");
+    const token = jwt.sign({ id: "2", role: "USER" }, process.env.JWT_SECRET || "minishop-local-development-secret");
+    const response = await request(app).get("/api/orders").set("Authorization", `Bearer ${token}`);
 
     expect(response.status).toBe(503);
     expect(response.body.error).toBe("Backend service unavailable");
@@ -123,15 +124,25 @@ describe("API Gateway", () => {
 
     it("never forwards a client-supplied identity header", async () => {
       global.fetch.mockResolvedValue(ok());
-      await request(app).get("/api/orders").set("x-user-role", "ADMIN").set("x-user-id", "evil");
+      await request(app)
+        .get("/api/orders")
+        .set("Authorization", `Bearer ${userToken()}`)
+        .set("x-user-role", "ADMIN")
+        .set("x-user-id", "evil");
       const [, options] = global.fetch.mock.calls[0];
-      expect(options.headers["x-user-role"]).toBeUndefined();
-      expect(options.headers["x-user-id"]).toBeUndefined();
+      expect(options.headers["x-user-role"]).toBe("USER");
+      expect(options.headers["x-user-id"]).toBe("2");
     });
 
-    it("keeps the existing public order listing", async () => {
+    it.each(["/api/orders", "/api/orders/abc"])("requires authentication to read %s", async (path) => {
+      const response = await request(app).get(path);
+      expect(response.status).toBe(401);
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it("lets a logged-in user list their orders", async () => {
       global.fetch.mockResolvedValue(ok());
-      expect((await request(app).get("/api/orders")).status).toBe(200);
+      expect((await request(app).get("/api/orders").set("Authorization", `Bearer ${userToken()}`)).status).toBe(200);
     });
   });
 });

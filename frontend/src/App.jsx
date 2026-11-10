@@ -264,9 +264,11 @@ function App() {
   }
 
   async function loadOrders() {
+    if (!session?.token) { setOrders([]); return }
     setOrdersLoading(true)
     try {
-      const response = await fetch(`${API_URL}/api/orders`)
+      const response = await fetch(`${API_URL}/api/orders`, { headers: { Authorization: `Bearer ${session.token}` } })
+      if (response.status === 401) return handleExpiredSession()
       if (!response.ok) throw new Error('The order service could not be reached.')
       setOrders(await response.json())
     } catch (requestError) {
@@ -277,7 +279,7 @@ function App() {
   }
 
   useEffect(() => { loadProducts() }, [])
-  useEffect(() => { if (session) loadOrders() }, [session])
+  useEffect(() => { if (session) loadOrders(); else setOrders([]) }, [session])
   useEffect(() => { localStorage.setItem(CART_KEY, JSON.stringify(cart)) }, [cart])
 
   useEffect(() => {

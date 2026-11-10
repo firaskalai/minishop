@@ -192,6 +192,38 @@ describe("Order Service", () => {
       expect(response.body).toMatchObject({ total: 4, pending: 1, confirmed: 2, rejected: 1, confirmedValue: 500 });
     });
 
+    it("lists only the caller's own orders, even for an admin", async () => {
+      await make({ customer: { id: "u1", name: "Ari", email: "ari@example.com" } });
+      await make({ customer: { id: "u2", name: "Sam", email: "sam@example.com" } });
+      await make({ customer: { id: "a1", name: "Admin", email: "admin@minishop.local" } });
+      await make();
+
+      const mine = await request(app).get("/orders").set(user);
+      expect(mine.status).toBe(200);
+      expect(mine.body).toHaveLength(1);
+      expect(mine.body[0].customer.id).toBe("u1");
+
+      const adminOwn = await request(app).get("/orders").set(admin);
+      expect(adminOwn.body).toHaveLength(1);
+      expect(adminOwn.body[0].customer.id).toBe("a1");
+
+      const all = await request(app).get("/orders/manage").set(admin);
+      expect(all.body.total).toBe(4);
+    });
+
+    it("requires authentication to list orders", async () => {
+      expect((await request(app).get("/orders")).status).toBe(401);
+    });
+
+    it("only lets the owner or an admin read a single order", async () => {
+      const order = await make({ customer: { id: "u1", name: "Ari", email: "ari@example.com" } });
+      const other = { ...user, "x-user-id": "u2" };
+      expect((await request(app).get(`/orders/${order._id}`)).status).toBe(401);
+      expect((await request(app).get(`/orders/${order._id}`).set(other)).status).toBe(404);
+      expect((await request(app).get(`/orders/${order._id}`).set(user)).status).toBe(200);
+      expect((await request(app).get(`/orders/${order._id}`).set(admin)).status).toBe(200);
+    });
+
     it("stores the customer from forwarded identity on new orders", async () => {
       global.fetch.mockResolvedValue({ ok: true, json: async () => ({ name: "Lamp", price: 50 }) });
       const response = await request(app).post("/orders").set(user).send({ items: [{ productId, quantity: 1 }] });
