@@ -1,0 +1,114 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: minishop-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: minishop
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.runCommand({ ping: 1 }).ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  product-service:
+    build:
+      context: ./product-service
+    container_name: minishop-product-service
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      PORT: 4001
+      MONGODB_URI: ${PRODUCTS_MONGODB_URI:-mongodb://mongo:27017/minishop_products}
+    ports:
+      - "4001:4001"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4001/health').then(response => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  order-service:
+    build:
+      context: ./order-service
+    container_name: minishop-order-service
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+    environment:
+      PORT: 4002
+      MONGODB_URI: ${ORDERS_MONGODB_URI:-mongodb://mongo:27017/minishop_orders}
+      PRODUCT_SERVICE_URL: http://product-service:4001
+    ports:
+      - "4002:4002"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4002/health').then(response => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  auth-service:
+    build:
+      context: ./auth-service
+    container_name: minishop-auth-service
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      PORT: 4003
+      MONGODB_URI: ${AUTH_MONGODB_URI:-mongodb://mongo:27017/minishop_auth}
+      JWT_SECRET: ${JWT_SECRET:-minishop-local-development-secret}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-admin@minishop.local}
+      ADMIN_SEED_EMAIL: ${ADMIN_SEED_EMAIL:-admin@minishop.local}
+      ADMIN_SEED_PASSWORD: ${ADMIN_SEED_PASSWORD:-Admin12345!}
+    ports:
+      - "4003:4003"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4003/health').then(response => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  api-gateway:
+    build:
+      context: ./api-gateway
+    container_name: minishop-api-gateway
+    restart: unless-stopped
+    depends_on:
+      product-service:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+    environment:
+      PORT: 4000
+      PRODUCT_SERVICE_URL: http://product-service:4001
+      ORDER_SERVICE_URL: http://order-service:4002
+      AUTH_SERVICE_URL: http://auth-service:4003
+      JWT_SECRET: ${JWT_SECRET:-minishop-local-development-secret}
+    ports:
+      - "4000:4000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4000/health').then(response => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  mongo_data:
